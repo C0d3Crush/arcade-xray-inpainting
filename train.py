@@ -133,16 +133,15 @@ def save_checkpoint(model, optimizer, epoch, loss, path):
 def main():
     parser = argparse.ArgumentParser(description="Train CMT on ARCADE grayscale X-rays")
 
-    parser.add_argument('--train_img',  default='arcade/stenosis/train/images')
-    parser.add_argument('--train_ann',  default='arcade/stenosis/train/annotations/train.json')
-    parser.add_argument('--val_img',    default='arcade/stenosis/val/images')
-    parser.add_argument('--val_ann',    default='arcade/stenosis/val/annotations/val.json')
+    parser.add_argument('--train_img',  default='arcade/syntax/train/images')
+    parser.add_argument('--train_ann',  default='arcade/syntax/train/annotations/train.json')
+    parser.add_argument('--val_img',    default='arcade/syntax/val/images')
+    parser.add_argument('--val_ann',    default='arcade/syntax/val/annotations/val.json')
     parser.add_argument('--output_dir', default='checkpoints')
     parser.add_argument('--ckpt',       default=None,  help='Resume from checkpoint')
     parser.add_argument('--epochs',     type=int, default=100)
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--lr',         type=float, default=1e-4)
-    parser.add_argument('--image_size', type=int, default=256)
     parser.add_argument('--num_workers',type=int, default=2)
     parser.add_argument('--save_every', type=int, default=10,
                         help='Save checkpoint every N epochs')
@@ -160,10 +159,10 @@ def main():
     device = torch.device(args.device)
 
     # ---- Datasets ----
-    train_dataset = ArcadeDataset(args.train_img, args.train_ann, args.image_size)
-    val_dataset   = ArcadeDataset(args.val_img,   args.val_ann,   args.image_size)
-
-     # Smoke test — remove these two lines for real training
+    train_dataset = ArcadeDataset(args.train_img, args.train_ann, args.input_size)
+    val_dataset   = ArcadeDataset(args.val_img,   args.val_ann,   args.input_size)
+    
+    # Smoke test — remove these two lines for real training
     if args.smoke_test:
         train_dataset.image_ids = train_dataset.image_ids[:args.smoke_size]
         val_dataset.image_ids   = val_dataset.image_ids[:max(1, args.smoke_size // 2)]

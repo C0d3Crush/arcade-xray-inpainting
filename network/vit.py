@@ -28,15 +28,6 @@ class Window_partition(nn.Module):
         return torch.cat([windows, windows_], 1)
 
 def window_reverse(windows, window_size, resolution):
-    """
-    Args:
-        windows: (num_windows*B, window_size, window_size, C)
-        window_size (list): window size (height, width)
-        H (int): Height of image
-        W (int): Width of image
-    Returns:
-        x: (B, H, W, C)
-    """
     H, W = pair(resolution)
     kH, kW = pair(window_size)
     sH, sW = kH // 2, kW // 2
@@ -51,7 +42,6 @@ def window_reverse(windows, window_size, resolution):
     y_[..., sH:-sH, sW:-sW] = x_.permute(0, 5, 1, 3, 2, 4).reshape(B, 1, H-kH, W-kW)
 
     return [y, y_]
-
 
 
 # classes
@@ -83,7 +73,7 @@ class FeedForward(nn.Module):
 class Attention(nn.Module):
     def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0., window=16, resolution=256, is_overlap=True):
         super().__init__()
-        inner_dim = dim_head *  heads
+        inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
         self.heads = heads
         self.scale = dim_head ** -0.5
@@ -103,11 +93,15 @@ class Attention(nn.Module):
         self.is_overlap = is_overlap
         self.pooling = nn.AvgPool2d(2, stride=1)
 
+        # Dynamic patch grid size
+        self.nH = resolution // window
+        self.nW = resolution // window
+
     def forward(self, x, mask):
         B = x.shape[0]
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
-        
+
         with torch.no_grad():
             updated = (torch.mean(mask[:, 1:], dim=-1, keepdim=True) > 0.) * 1.
             updated = torch.cat([torch.ones_like(updated[:, :1]), updated], 1)
@@ -121,12 +115,11 @@ class Attention(nn.Module):
         dots = torch.matmul(q * q_m, (k * k_m).transpose(-1, -2)) * self.scale
         attn = self.attend(dots)
         out = torch.matmul(attn, v_m * v)
-        out = rearrange(out, 'b h n d -> b n (h d)') * updated 
+        out = rearrange(out, 'b h n d -> b n (h d)') * updated
 
         with torch.no_grad():
             m = torch.matmul(attn, v_m)
             m = rearrange(m, 'b h n d -> b n (h d)') * updated
-
 
         # bridge update for bridge tokens
         kH, kW = pair(self.window)
@@ -135,51 +128,51 @@ class Attention(nn.Module):
 
         if self.is_overlap:
             ## update region for bridge
-            out_bridge = out[:, 1:nH*nW+1].reshape(B, nH, nW, -1).unfold(1, 2, 1).unfold(2, 2, 1) # B, nH-1, nW-1, C, 2, 2
+            out_bridge = out[:, 1:nH*nW+1].reshape(B, nH, nW, -1).unfold(1, 2, 1).unfold(2, 2, 1)
             out_bridge = torch.mean(out_bridge, (-2, -1))
             with torch.no_grad():
-                m_bridge = m[:, 1:nH*nW+1].reshape(B, nH, nW, -1).unfold(1, 2, 1).unfold(2, 2, 1) # B, nH-1, nW-1, C, 2, 2
+                m_bridge = m[:, 1:nH*nW+1].reshape(B, nH, nW, -1).unfold(1, 2, 1).unfold(2, 2, 1)
                 m_bridge = torch.mean(m_bridge, (-2, -1))
-                # average & update
                 m_bridge = m_bridge.reshape(B, (nH-1) * (nW-1), -1) * (1 - updated[:, -(nH-1)*(nW-1):])
 
-            # average & update 
             out_bridge = out_bridge.reshape(B, (nH-1) * (nW-1), -1) * (1 - updated[:, -(nH-1)*(nW-1):])
 
-
             ## update region for origin
-            out_origin = F.pad(out[:, -(nH-1)*(nW-1):].reshape(B, nH-1, nW-1, -1), (0, 0, 1, 1, 1, 1), value=0)  
-            out_origin = out_origin.unfold(1, 2, 1).unfold(2, 2, 1) # B, nH, nW, C, 2, 2
+            out_origin = F.pad(out[:, -(nH-1)*(nW-1):].reshape(B, nH-1, nW-1, -1), (0, 0, 1, 1, 1, 1), value=0)
+            out_origin = out_origin.unfold(1, 2, 1).unfold(2, 2, 1)
             out_origin = torch.mean(out_origin, (-2, -1))
             with torch.no_grad():
                 m_origin = F.pad(m[:, -(nH-1)*(nW-1):].reshape(B, nH-1, nW-1, -1), (0, 0, 1, 1, 1, 1), value=0)
-                m_origin = m_origin.unfold(1, 2, 1).unfold(2, 2, 1) # B, nH, nW, C, 2, 2
+                m_origin = m_origin.unfold(1, 2, 1).unfold(2, 2, 1)
                 m_origin = torch.mean(m_origin, (-2, -1))
-
-                # average & update
                 m_origin = m_origin.reshape(B, nH*nW, -1) * (1 - updated[:, 1:nH*nW+1])
-
-                # final update
                 m[:, 1:nH*nW+1] += m_origin
                 m[:, -(nH-1)*(nW-1):] += m_bridge
 
-            # average & update
             out_origin = out_origin.reshape(B, nH*nW, -1) * (1 - updated[:, 1:nH*nW+1])
-
-            # final update
             out[:, 1:nH*nW+1] += out_origin
             out[:, -(nH-1)*(nW-1):] += out_bridge
 
-
         with torch.no_grad():
-            inter = F.interpolate(torch.mean(m[:, 1:], dim=-1, keepdim=True)[:, :16*16].reshape(-1, 1, 16, 16), (256, 256))
-            inter_shift = F.interpolate(torch.mean(m[:, 1:], dim=-1, keepdim=True)[:, -15*15:].reshape(-1, 1, 15, 15), (15*16, 15*16))
-            inter[..., 8:-8, 8:-8] = (inter[..., 8:-8, 8:-8] + inter_shift) / 2
+            # Dynamic inter — skip shifted merge if slice would be empty
+            inter = F.interpolate(
+                torch.mean(m[:, 1:], dim=-1, keepdim=True)[:, :nH*nW].reshape(-1, 1, nH, nW),
+                (self.resolution, self.resolution)
+            )
+            slice_h = (nH // 2) * self.window
+            slice_w = (nW // 2) * self.window
+            if slice_h > 0 and slice_w > 0 and self.resolution - 2 * slice_h > 0:
+                inter_shift = F.interpolate(
+                    torch.mean(m[:, 1:], dim=-1, keepdim=True)[:, -(nH-1)*(nW-1):].reshape(-1, 1, nH-1, nW-1),
+                    ((nH-1)*self.window, (nW-1)*self.window)
+                )
+                inter[..., slice_h:-slice_h, slice_w:-slice_w] = (
+                    inter[..., slice_h:-slice_h, slice_w:-slice_w] + inter_shift
+                ) / 2
             m = m @ torch.abs(self.to_out[0].weight.transpose(1, 0))
 
-
-
         return self.to_out(out), m, inter
+
 
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0., window=16, resolution=256):
@@ -205,18 +198,23 @@ class Transformer(nn.Module):
             stack.append(inter)
         return x, stack
 
+
 class ViT(nn.Module):
     def __init__(self, image_size, patch_size, dim, depth, heads, mlp_dim, channels = 1, dim_head = 64, dropout = 0.):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)
 
-        assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+        assert image_height % patch_height == 0 and image_width % patch_width == 0, \
+            'Image dimensions must be divisible by the patch size.'
+        assert image_height >= patch_height * 2, \
+            'Image size must be at least 2x the patch size.'
 
         num_h_patches = image_height // patch_height
         num_w_patches = image_width // patch_width
+
         patch_dim = (channels + 1) * patch_height * patch_width
-        out_dim = channels * patch_height * patch_width
+        out_dim   = channels * patch_height * patch_width
 
         self.to_patch = nn.Sequential(
             Window_partition(patch_size),
@@ -236,16 +234,14 @@ class ViT(nn.Module):
 
         self.window = patch_size
         self.resolution = image_size
-
-        #self.to_image = Rearrange('b (h w) (p1 p2 c) -> b c (h p1) (w p2)', h = num_h_patches, w = num_w_patches, p1 = patch_height, p2 = patch_width)
         self.mask_to_flat = Window_partition(patch_size)
 
     def forward(self, img, mask):
         mask = 1 - mask
         x = self.to_patch(torch.cat((img, mask), 1))
-        # mask updated
+
         with torch.no_grad():
-            m = self.mask_to_flat(mask.repeat(1, 2, 1, 1)) # b, n, 1
+            m = self.mask_to_flat(mask.repeat(1, 2, 1, 1))
             m = torch.cat((torch.ones_like(m[:, :1]), m), dim=1)
             m = m @ torch.abs(self.to_patch[1].weight.transpose(1, 0))
 
@@ -255,17 +251,10 @@ class ViT(nn.Module):
         x = torch.cat((cls_tokens, x), dim=1)
         x += self.pos_embedding
 
-        #inter_m = m / (1e-6 + torch.max(m, dim=2, keepdim=True)[0])
-        #inter = F.interpolate(torch.mean(inter_m[:, 1:], dim=-1, keepdim=True)[:, :16*16].reshape(-1, 1, 16, 16), (256, 256))
-        #inter_shift = F.interpolate(torch.mean(inter_m[:, 1:], dim=-1, keepdim=True)[:, -15*15:].reshape(-1, 1, 15, 15), (15*16, 15*16))
-        #inter[..., 8:-8, 8:-8] = (inter[..., 8:-8, 8:-8] + inter_shift) / 2
-
-
         x, stack = self.transformer(x, m)
         x = x[:, 1:]
-        x = self.mlp_head(x) # B, S, 3
+        x = self.mlp_head(x)
 
         out = window_reverse(x, self.window, self.resolution)
 
         return out, stack
-
