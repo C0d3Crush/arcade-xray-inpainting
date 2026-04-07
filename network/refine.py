@@ -61,7 +61,7 @@ class Refine(nn.Module):
                 x = f(torch.cat((x, feat), -1))
                 feats.pop()
 
-        outputs = x.reshape(B, H, W, 3).permute(0, 3, 1, 2)
+        outputs = x.reshape(B, H, W, 1).permute(0, 3, 1, 2)
 
 
         return outputs
