@@ -151,6 +151,8 @@ def main():
                     help='Run with 2 train / 1 val image to verify pipeline')
     parser.add_argument('--smoke_size', type=int, default=2,
                     help='Number of images to use in smoke test')
+    parser.add_argument('--input_size', type=int, default=256,
+                    help='Input image size (must be power of 2, min 32)')
 
     args = parser.parse_args()
 
@@ -175,7 +177,7 @@ def main():
     print(f"Train: {len(train_dataset)} images | Val: {len(val_dataset)} images")
 
     # ---- Model ----
-    model = Inpaint().to(device)
+    model = Inpaint(input_size=args.input_size).to(device)
 
     if args.ckpt and os.path.exists(args.ckpt):
         model = load_checkpoint(args.ckpt, model, device)
