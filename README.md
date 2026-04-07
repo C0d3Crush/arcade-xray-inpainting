@@ -1,37 +1,71 @@
-![Python 3.7](https://img.shields.io/badge/python-3.7-green.svg)
+```markdown
+![Python 3.9](https://img.shields.io/badge/python-3.9-green.svg)
+# CMT — ARCADE Grayscale Inpainting Fork
+Based on Keunsoo Ko and Chang-Su Kim,
+"Continuously Masked Transformer for Image Inpainting, ICCV, 2023"
 
-# CMT
+This fork adapts CMT for **grayscale coronary angiography inpainting** using the [ARCADE dataset](https://arcade.grand-challenge.org/). The goal is to reconstruct realistic X-ray backgrounds by inpainting vessel regions, enabling synthetic image generation.
 
-Keunsoo Ko and Chang-Su Kim
-
-Official PyTorch Code for "Continuously Masked Transformer for Image Inpainting, ICCV, 2023"
+---
 
 ### Installation
-Download repository:
-```
-    $ git clone https://github.com/keunsoo-ko/CMT.git
-```
-Download [pre-trained model on Places2](https://drive.google.com/file/d/1zLkKixPnuoAY1k4fdq6JjidlRafKMhXN/view?usp=sharing) or [pre-trained model on CelebA](https://drive.google.com/file/d/1e6EbwGnMGgGXAn4QLffT_Zx_BbidBSbR/view?usp=sharing)
-
-### Usage
-Run Test:
-```
-    $ python demo.py --ckpt CMT.pth(put downloaded model path) --img_path ./samples/test_img --mask_path ./samples/test_mask --output_path ./samples/results
+```bash
+git clone https://github.com/keunsoo-ko/CMT.git
+cd CMT
+python -m venv venv
+source venv/bin/activate
+pip install torch torchvision tqdm einops timm
+pip install --only-binary=:all: opencv-python-headless
+pip install "numpy<2"
 ```
 
-### Device support (added in this fork)
+---
 
-You can specify whether to run on CPU or GPU:
-
+### Training on ARCADE
+```bash
+python train.py \
+  --train_img arcade/syntax/train/images \
+  --train_ann arcade/syntax/train/annotations/train.json \
+  --val_img   arcade/syntax/val/images \
+  --val_ann   arcade/syntax/val/annotations/val.json \
+  --epochs 100 \
+  --batch_size 4 \
+  --device cpu
 ```
-    $ python demo.py --ckpt CMT.pth --img_path ./samples/test_img --mask_path ./samples/test_mask --output_path ./samples/results --device cpu
+
+Checkpoints are saved to `checkpoints/`. The best model by validation PSNR is saved as `checkpoints/best.pth`.
+
+**Smoke test** (verifies pipeline with 2 images, ~1 minute on CPU):
+```bash
+python train.py \
+  --train_img arcade/syntax/train/images \
+  --train_ann arcade/syntax/train/annotations/train.json \
+  --val_img   arcade/syntax/val/images \
+  --val_ann   arcade/syntax/val/annotations/val.json \
+  --smoke_test --epochs 1 --batch_size 1 --device cpu
 ```
 
-GPU:
+---
 
+### Inference
+```bash
+python demo.py \
+  --ckpt checkpoints/best.pth \
+  --img_path ./samples/test_img \
+  --mask_path ./samples/test_mask \
+  --output_path ./samples/results \
+  --device cpu
 ```
-    $ python demo.py --ckpt CMT.pth --img_path ./samples/test_img --mask_path ./samples/test_mask --output_path ./samples/results --device cuda
+
+Images of any resolution are automatically resized to 256×256 for inference.
+Use `--device cuda` for GPU.
+
+---
+
+### Changes from original
+- Adapted pipeline to 1-channel grayscale input (from RGB)
+- Added `train.py` for training on ARCADE coronary angiography dataset
+- Vessel masks generated automatically from COCO-format polygon annotations
+- Added `--device` flag to `demo.py` for CPU/GPU selection
+- Added `--smoke_test` flag to `train.py` for quick pipeline verification
 ```
-
-The checkpoint loader uses `map_location`, therefore models trained on GPU can also be loaded on CPU without modification.
-
