@@ -85,7 +85,12 @@ def main():
     model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
     print("=> conv1 patched: 3 channels → 1 channel (grayscale)")
 
-    model = torch.nn.DataParallel(model).cuda()
+    if torch.cuda.is_available():
+        device = torch.device("cuda"); model = torch.nn.DataParallel(model).cuda()
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps"); model = model.to(device)
+    else:
+        device = torch.device("cpu"); model = model.to(device)
     print(model)
 
     # Optionally resume from checkpoint
@@ -100,7 +105,7 @@ def main():
         else:
             print(f"=> no checkpoint found at '{args.resume}'")
 
-    cudnn.benchmark = True
+    cudnn.benchmark = torch.cuda.is_available()
 
     # Data loading
     traindir = os.path.join(args.data, 'train')
@@ -120,7 +125,7 @@ def main():
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
     val_loader = torch.utils.data.DataLoader(
@@ -134,10 +139,10 @@ def main():
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
-    criterion  = nn.CrossEntropyLoss().cuda()
+    criterion  = nn.CrossEntropyLoss().to(device)
     optimizer  = torch.optim.SGD(
         model.parameters(),
         args.lr,
@@ -151,8 +156,8 @@ def main():
 
     for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(optimizer, epoch)
-        train(train_loader, model, criterion, optimizer, epoch)
-        prec1 = validate(val_loader, model, criterion)
+        train(train_loader, model, criterion, optimizer, epoch, device)
+        validate(val_loader, model, criterion, device)
 
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
@@ -164,7 +169,7 @@ def main():
         }, is_best, args.arch.lower())
 
 
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, device):
     batch_time = AverageMeter()
     data_time  = AverageMeter()
     losses     = AverageMeter()
@@ -177,8 +182,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
     for i, (input, target) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
-        target = target.cuda(non_blocking=True)
-        input  = input.cuda(non_blocking=True)
+        target = target.to(device, non_blocking=True)
+        input  = input.to(device, non_blocking=True)
 
         output = model(input)
         loss   = criterion(output, target)
@@ -204,7 +209,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   f'Prec@5 {top5.val:.3f} ({top5.avg:.3f})')
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, device):
     batch_time = AverageMeter()
     losses     = AverageMeter()
     top1       = AverageMeter()
@@ -215,8 +220,8 @@ def validate(val_loader, model, criterion):
 
     with torch.no_grad():
         for i, (input, target) in enumerate(val_loader):
-            target = target.cuda(non_blocking=True)
-            input  = input.cuda(non_blocking=True)
+            target = target.to(device, non_blocking=True)
+            input  = input.to(device, non_blocking=True)
 
             output = model(input)
             loss   = criterion(output, target)
