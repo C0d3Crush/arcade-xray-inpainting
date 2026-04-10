@@ -205,7 +205,7 @@ def main():
 
     # ---- Optimiser & Loss ----
     optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999))
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = InpaintingLoss().to(device)
 
     # ---- Training loop ----
