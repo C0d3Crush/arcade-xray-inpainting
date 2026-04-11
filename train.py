@@ -77,16 +77,49 @@ class ArcadeDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Loss
 # ---------------------------------------------------------------------------
+def ssim_loss(pred, target, window_size=11):
+    """Differentiable SSIM loss (1 - SSIM) for grayscale images in [-1, 1]."""
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+
+    # Gaussian window
+    coords = torch.arange(window_size, dtype=pred.dtype, device=pred.device)
+    coords -= window_size // 2
+    g = torch.exp(-(coords ** 2) / (2 * 1.5 ** 2))
+    g = g / g.sum()
+    window = g.unsqueeze(0) * g.unsqueeze(1)
+    window = window.unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+
+    pad = window_size // 2
+    mu1 = torch.nn.functional.conv2d(pred,   window, padding=pad, groups=1)
+    mu2 = torch.nn.functional.conv2d(target, window, padding=pad, groups=1)
+
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = torch.nn.functional.conv2d(pred   * pred,   window, padding=pad) - mu1_sq
+    sigma2_sq = torch.nn.functional.conv2d(target * target, window, padding=pad) - mu2_sq
+    sigma12   = torch.nn.functional.conv2d(pred   * target, window, padding=pad) - mu1_mu2
+
+    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / \
+               ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+
+    return 1 - ssim_map.mean()
+
+
 class InpaintingLoss(nn.Module):
-    """L1 loss on masked (vessel) region + background consistency."""
-    def __init__(self):
+    """L1 + SSIM loss on masked region + L1 background consistency."""
+    def __init__(self, ssim_weight=0.5):
         super().__init__()
         self.l1 = nn.L1Loss()
+        self.ssim_weight = ssim_weight
 
     def forward(self, output, target, mask):
         loss_mask  = self.l1(output * mask,       target * mask)
         loss_valid = self.l1(output * (1 - mask), target * (1 - mask))
-        return loss_mask * 6.0 + loss_valid
+        loss_ssim  = ssim_loss(output, target)
+        return loss_mask * 6.0 + loss_valid + self.ssim_weight * loss_ssim
 
 
 # ---------------------------------------------------------------------------
