@@ -20,6 +20,10 @@ temp/
 samples/.DS_Store
 samples/**/.DS_Store
 
+# Local notes
+TODO.md
+CLAUDE.md
+
 # Sonstiges
 *.zip
 
